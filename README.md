@@ -3,7 +3,8 @@
 PowerShell-Host is a JavaScript library which hosts a
 [PowerShell](https://github.com/PowerShell/PowerShell)
 process to allow running commands and getting the results back quickly.
-PowerShell Exceptions are intercepted the Exception.Message is emitted to stderr.
+PowerShell Exceptions are intercepted and the Message property is
+emitted to stderr.
 
 This implementation uses Promises to make things easy to use:
 
