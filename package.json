@@ -10,7 +10,7 @@
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "github:rsmarples/PowerShell-Host"
+        "url": "git+https://github.com/rsmarples/PowerShell-Host.git"
     },
     "main": "./PowerShell.js",
     "keywords": [
