@@ -1,0 +1,4 @@
+node_modules/
+
+# I use this for testing
+index.js

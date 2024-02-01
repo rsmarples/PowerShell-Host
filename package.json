@@ -1,0 +1,32 @@
+{
+    "name": "powershell-host",
+    "version": "1.0.0",
+    "description": "Hosts a PowerShell process to execute asynchronous PowerShell commands and get data back fast.",
+    "author": {
+        "name": "Roy Marples",
+        "email": "roy@marples.name",
+        "url": "https://roy.marples.name"
+    },
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "github:rsmarples/PowerShell-Host"
+    },
+    "main": "./PowerShell.js",
+    "keywords": [
+        "promise",
+        "performance",
+        "promises",
+        "async",
+        "await",
+        "PowerShell"
+    ],
+    "scripts": {
+        "prettier": "prettier --check .",
+        "prettier:format": "prettier --write ."
+    },
+    "devDependencies": {
+        "prettier": "^3.2.4"
+    },
+    "type": "module"
+}
