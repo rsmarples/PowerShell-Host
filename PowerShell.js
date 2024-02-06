@@ -78,16 +78,21 @@ export class PowerShell extends EventEmitter {
     /**
      * Spawns a PowerShell process.
      * You can only have one of these.
-     * Call deinit() once finished to kill the PowerShell process.
+     * Call close() once finished to kill the PowerShell process.
+     * Consumers should listen to the `error` event which could be raised before the shell
+     * has fully initialised as this could happen after the open promise has been resolved.
      *
      * @param {PowerShellOptions} [options] PowerShell options
      * @returns {Promise<void>}
      */
-    init(options) {
+    open(options) {
         const opts = {
             ...defaultOptions,
             ...options,
         };
+        this.#stdout = '';
+        this.#stderr = '';
+
         return new Promise((resolve, reject) => {
             const ps = this;
 
@@ -96,7 +101,7 @@ export class PowerShell extends EventEmitter {
                 return;
             }
 
-            ps.#child = spawn(opts.shell, ['-NoLogo', opts.args]);
+            ps.#child = spawn(opts.shell, ['-NoLogo', ...opts.args]);
             if (!ps.#child) {
                 reject(new Error('shell failed to spawn'));
                 return;
@@ -108,11 +113,32 @@ export class PowerShell extends EventEmitter {
             });
             this.#child.on('error', function (err) {
                 if (!ps.#spawned) {
+                    ps.#child.removeAllListeners();
                     ps.#child = undefined;
                     reject(err);
                     return;
                 }
                 ps.emit('error', err);
+            });
+            this.#child.on('exit', (code, signal) => {
+                ps.#child.removeAllListeners();
+                ps.#child = undefined;
+
+                if (this.#stderr) {
+                    const err = new Error(ps.#stderr);
+                    ps.#stderr = '';
+                    ps.emit('error', err);
+                }
+
+                // The client can remove the listener when closing to avoid this emit
+                ps.emit('exit', code, signal);
+
+                // We need to reject the pending queue
+                /** @type {PowerShellCmd} */
+                let q;
+                while ((q = this.#cmdQueue.shift())) {
+                    q.reject(new Error('shell exited'));
+                }
             });
 
             this.#child.stdout.on('data', function (chunk) {
@@ -122,7 +148,11 @@ export class PowerShell extends EventEmitter {
                 ps.#processStdErr(chunk);
             });
 
-            this.#child.stdin.write(`${outDefault}${prompt}`);
+            try {
+                this.#child.stdin.write(`${outDefault}${prompt}`);
+            } catch (err) {
+                reject(err);
+            }
         });
     }
 
@@ -185,7 +215,8 @@ export class PowerShell extends EventEmitter {
     }
 
     #processStdErr(chunk) {
-        this.#stderr += chunk.toString();
+        const data = chunk.toString();
+        this.#stderr += data;
     }
 
     /**
@@ -200,6 +231,9 @@ export class PowerShell extends EventEmitter {
      * @returns {Promise<string>}
      */
     exec(cmd) {
+        if (!this.#child) {
+            throw new Error('No open shell to execute commands');
+        }
         return new Promise((resolve, reject) => {
             /** @type {PowerShellCmd} */
             const q = {
@@ -217,9 +251,18 @@ export class PowerShell extends EventEmitter {
     /**
      * Kill any child process.
      *
-     * @returns {void}
+     * @returns {boolean} Returns true if we notified the shell to exist, otherwise false.
      */
-    deinit() {
-        this.#child?.kill();
+    close() {
+        return this.#child?.kill() ?? false;
+    }
+
+    /**
+     * Returns true if we have a PowerShell open
+     *
+     * @returns {boolean}
+     */
+    isOpen() {
+        return !!this.#child;
     }
 }

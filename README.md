@@ -21,7 +21,21 @@ import { PowerShell } from 'powershell-host';
 const ps = new PowerShell();
 
 const run = async () => {
-    await ps.init();
+    // Open a new PowerShell without any profile which might impede us
+    await ps.open({ args: ['-NoProfile'] });
+
+    // Log any errors that might occur after opening
+    // such as invalid arguments in the open command above
+    ps.on('error', (err) => {
+        console.log(`ERROR: ${err}`);
+    });
+
+    // Log if shell exits for any reason
+    ps.on('exit', (code, signal) => {
+        // Will not log graceful exit we removed all listeners on close
+        console.log(`shell exited code:${code} signal: ${signal}`);
+    });
+
     const json = await ps.exec('Get-PsDrive | Select Name, Root | ConvertTo-Json');
     const obj = JSON.parse(json);
     // Newer versions of PowerShell can use ConvertTo-Json -ToArray to avoid forcing an array here
@@ -34,6 +48,7 @@ run()
         console.error(`ERROR: ${err.message}`);
     })
     .finally(() => {
-        ps.deinit();
+        ps.close();
+        ps.removeAllListeners();
     });
 ```

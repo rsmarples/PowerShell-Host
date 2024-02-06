@@ -7,9 +7,9 @@ export class PowerShell {
     /**
      * Spawns a PowerShell process.
      * You can only have one of these.
-     * Call deinit() once finished to kill the PowerShell process.
+     * Call close() once finished to kill the PowerShell process.
      */
-    init(options?: PowerShellOptions): Promise<void>;
+    open(options?: PowerShellOptions): Promise<void>;
 
     /**
      * Executes the command.
@@ -24,5 +24,17 @@ export class PowerShell {
     /**
      * Kill any child process.
      */
-    deinit(): void;
+    close(): void;
+
+    /**
+     * Returns true if we have a PowerShell open
+     */
+    isOpen(): boolean;
+
+    // Events
+    on(event: 'error', listener: (err: Error) => void): this;
+    on(event: 'exit', listener: (code: number, signal: number) => void): this;
+    off(event: 'error', listener: (err: Error) => void): this;
+    off(event: 'exit', listener: (code: number, signal: number) => void): this;
+    removeAllListeners(event?: string | symbol): this;
 }
