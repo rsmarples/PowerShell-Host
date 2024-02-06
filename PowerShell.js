@@ -101,7 +101,7 @@ export class PowerShell extends EventEmitter {
                 return;
             }
 
-            ps.#child = spawn(opts.shell, ['-NoLogo', ...opts.args]);
+            ps.#child = spawn(opts.shell, opts.args);
             if (!ps.#child) {
                 reject(new Error('shell failed to spawn'));
                 return;
