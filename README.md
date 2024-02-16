@@ -11,7 +11,11 @@ This implementation uses Promises to make things easy to use:
 -   Output on stderr will be rejected.
 -   Output on stdout will be resolved.
 
-## Example:
+## Installation
+
+`npm install powershell-host`
+
+## Example
 
 You can use the in-built ConvertTo-Json applet to make parsing the data easy.
 
@@ -22,6 +26,7 @@ const ps = new PowerShell();
 
 const run = async () => {
     // Open a new PowerShell without any profile which might impede us
+    // We could use `shell: 'pwsh'` in the options to open a newer PowerShell if installed
     await ps.open({ args: ['-NoProfile'] });
 
     // Log any errors that might occur after opening

@@ -1,5 +1,15 @@
 export type PowerShellOptions = {
+    /**
+     * The shell to spawn.
+     * The default is 'PowerShell'.
+     * You could use 'pwsh' if a newer version of PowerShell is installed.
+     */
     shell?: string;
+
+    /**
+     * The argument array passed to the shell startup.
+     * You could use [ '-NoLogo', '-NoProfile' ] to get a faster start.
+     */
     args?: string[];
 };
 
