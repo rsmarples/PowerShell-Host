@@ -11,6 +11,11 @@ export type PowerShellOptions = {
      * You could use [ '-NoLogo', '-NoProfile' ] to get a faster start.
      */
     args?: string[];
+
+    /**
+     * Set to true to log each exec and resolution.
+     */
+    log?: boolean;
 };
 
 export class PowerShell {
@@ -28,8 +33,10 @@ export class PowerShell {
      * Otherwise any output on stdout will be resolved as a string.
      * You could pipe your output the PowerShell applet ConvertTo-Json at the end of your
      * command and then use JSON.parse() on the string you can back, or do your own thing.
+     *
+     * Optionally add a timeout to the command in ms.
      */
-    exec(cmd: string): Promise<string>;
+    exec(cmd: string, timeout?: number): Promise<string>;
 
     /**
      * Kill any child process.

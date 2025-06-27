@@ -5,10 +5,12 @@ import { EventEmitter } from 'events';
  * @typedef {Object} PowerShellOptions
  * @property {string} [shell]
  * @property {string[]} [args]
+ * @property {boolean} log
  */
 const defaultOptions = {
     shell: 'PowerShell',
     args: [],
+    log: false,
 };
 
 /**
@@ -56,6 +58,8 @@ const prompt = `
  * @property {string} cmd
  * @property {ResolveCallback} resolve
  * @property {RejectCallback} reject
+ * @property {number?} timeout
+ * @property {number} timeoutId
  */
 
 /**
@@ -74,6 +78,8 @@ export class PowerShell extends EventEmitter {
     #cmd;
     /** @type {PowerShellCmd[]} */
     #cmdQueue = [];
+    /** @type {boolean} */
+    #log = false;
 
     /**
      * Spawns a PowerShell process.
@@ -92,6 +98,7 @@ export class PowerShell extends EventEmitter {
         };
         this.#stdout = '';
         this.#stderr = '';
+        this.#log = opts.log;
 
         return new Promise((resolve, reject) => {
             const ps = this;
@@ -166,6 +173,15 @@ export class PowerShell extends EventEmitter {
 
         const ps = this;
         const cmd = ps.#cmd;
+        if (cmd.timeout) {
+            cmd.timeoutId = setTimeout(() => {
+                cmd.timeoutId = undefined;
+                cmd.reject(new Error(`exec timeout: ${cmd.cmd.trimEnd()}`));
+            }, cmd.timeout);
+        }
+        if (this.#log) {
+            console.log(`exec: ${cmd.cmd.trimEnd()}`);
+        }
         this.#child.stdin.write(`${cmd.cmd}`, function (error) {
             if (error) {
                 ps.#popQueue();
@@ -175,7 +191,14 @@ export class PowerShell extends EventEmitter {
     }
 
     #reject(err) {
-        const rej = this.#cmd.reject;
+        const cmd = this.#cmd;
+        const rej = cmd.reject;
+        if (cmd.timeoutId) {
+            clearTimeout(cmd.timeoutId);
+        }
+        if (this.#log) {
+            console.log(`exec rejected: ${cmd.cmd.trimEnd()}: ${err}`);
+        }
         rej(new Error(err));
         this.#popQueue();
     }
@@ -188,15 +211,21 @@ export class PowerShell extends EventEmitter {
         }
 
         // The command is always echoed on the shell console. We need to trim it, and thus validate it.
-        const cmd = this.#cmd.cmd;
-        if (!this.#stdout.startsWith(cmd)) {
-            this.#reject(new Error(`data does not start with command: ${cmd}`));
+        const cmd = this.#cmd;
+        if (!this.#stdout.startsWith(cmd.cmd)) {
+            this.#reject(new Error(`data does not start with command: ${cmd.cmd}`));
             return;
         }
 
-        const result = this.#stdout.substring(cmd.length).trimEnd();
-        const resolve = this.#cmd.resolve;
+        const result = this.#stdout.substring(cmd.cmd.length).trimEnd();
+        const resolve = cmd.resolve;
+        if (cmd.timeoutId) {
+            clearTimeout(cmd.timeoutId);
+        }
         this.#popQueue();
+        if (this.#log) {
+            console.log(`exec completed: ${cmd.cmd.trimEnd()}`);
+        }
         resolve(result);
     }
 
@@ -228,9 +257,10 @@ export class PowerShell extends EventEmitter {
      * command and then use JSON.parse() on the string you can back, or do your own thing.
      *
      * @param {string} cmd The command to execute
+     * @param {number?} timeout Maximum time for command to execute in ms
      * @returns {Promise<string>}
      */
-    exec(cmd) {
+    exec(cmd, timeout) {
         if (!this.#child) {
             throw new Error('No open shell to execute commands');
         }
@@ -240,6 +270,8 @@ export class PowerShell extends EventEmitter {
                 cmd: cmd.trim() + '\n',
                 resolve: resolve,
                 reject: reject,
+                timeoutId: undefined,
+                timeout: timeout,
             };
             this.#cmdQueue = [...this.#cmdQueue, q];
             if (!this.#cmd && this.#inited) {

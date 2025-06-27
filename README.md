@@ -8,8 +8,8 @@ emitted to stderr.
 
 This implementation uses Promises to make things easy to use:
 
--   Output on stderr will be rejected.
--   Output on stdout will be resolved.
+- Output on stderr will be rejected.
+- Output on stdout will be resolved.
 
 ## Installation
 
