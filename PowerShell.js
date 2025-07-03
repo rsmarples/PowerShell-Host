@@ -62,10 +62,8 @@ const prompt = `
  * @property {number} timeoutId
  */
 
-export class PowerShellError extends Error {
-}
-export class PowerShellTimeout extends PowerShellError {
-}
+export class PowerShellError extends Error {}
+export class PowerShellTimeout extends PowerShellError {}
 
 /**
  * Hosts a PowerShell process where you can send commands and receive data back.
@@ -226,7 +224,9 @@ export class PowerShell extends EventEmitter {
         // The command is always echoed on the shell console. We need to trim it, and thus validate it.
         const cmd = this.#cmd;
         if (!this.#stdout.startsWith(cmd.cmd)) {
-            this.#reject(new PowerShellError(`data does not start with command: ${cmd.cmd}`));
+            this.#reject(
+                new PowerShellError(`data does not start with command: ${cmd.cmd}`),
+            );
             return;
         }
 
