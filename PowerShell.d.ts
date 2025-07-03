@@ -55,3 +55,6 @@ export class PowerShell {
     off(event: 'exit', listener: (code: number, signal: number) => void): this;
     removeAllListeners(event?: string | symbol): this;
 }
+
+export class PowerShellError extends Error {}
+export class PowerShellTimeout extends PowerShellError {}
