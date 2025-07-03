@@ -62,6 +62,11 @@ const prompt = `
  * @property {number} timeoutId
  */
 
+export class PowerShellError extends Error {
+}
+export class PowerShellTimeout extends PowerShellError {
+}
+
 /**
  * Hosts a PowerShell process where you can send commands and receive data back.
  */
@@ -104,13 +109,13 @@ export class PowerShell extends EventEmitter {
             const ps = this;
 
             if (ps.#child) {
-                reject(new Error('already spawned something'));
+                reject(new PowerShellError('already spawned something'));
                 return;
             }
 
             ps.#child = spawn(opts.shell, opts.args);
             if (!ps.#child) {
-                reject(new Error('shell failed to spawn'));
+                reject(new PowerShellError('shell failed to spawn'));
                 return;
             }
 
@@ -132,7 +137,7 @@ export class PowerShell extends EventEmitter {
                 ps.#child = undefined;
 
                 if (this.#stderr) {
-                    const err = new Error(ps.#stderr);
+                    const err = new PowerShellError(ps.#stderr);
                     ps.#stderr = '';
                     ps.emit('error', err);
                 }
@@ -144,7 +149,7 @@ export class PowerShell extends EventEmitter {
                 /** @type {PowerShellCmd} */
                 let q;
                 while ((q = this.#cmdQueue.shift())) {
-                    q.reject(new Error('shell exited'));
+                    q.reject(new PowerShellError('shell exited'));
                 }
             });
 
@@ -176,7 +181,9 @@ export class PowerShell extends EventEmitter {
         if (cmd.timeout) {
             cmd.timeoutId = setTimeout(() => {
                 cmd.timeoutId = undefined;
-                cmd.reject(new Error(`exec timeout: ${cmd.cmd.trimEnd()}`));
+                // XXX We neet to send CTRL-C somehow
+                ps.#popQueue();
+                cmd.reject(new PowerShellTimeout(`exec timeout: ${cmd.cmd.trimEnd()}`));
             }, cmd.timeout);
         }
         if (this.#log) {
@@ -185,13 +192,19 @@ export class PowerShell extends EventEmitter {
         this.#child.stdin.write(`${cmd.cmd}`, function (error) {
             if (error) {
                 ps.#popQueue();
-                cmd.reject(error);
+                cmd.reject(new PowerShellError(error));
             }
         });
     }
 
     #reject(err) {
         const cmd = this.#cmd;
+        if (!cmd) {
+            console.log(`nowhere for this error to go: ${err}`);
+            this.#popQueue();
+            return;
+        }
+
         const rej = cmd.reject;
         if (cmd.timeoutId) {
             clearTimeout(cmd.timeoutId);
@@ -199,8 +212,8 @@ export class PowerShell extends EventEmitter {
         if (this.#log) {
             console.log(`exec rejected: ${cmd.cmd.trimEnd()}: ${err}`);
         }
-        rej(new Error(err));
         this.#popQueue();
+        rej(err);
     }
 
     #resolveCmd() {
@@ -213,7 +226,7 @@ export class PowerShell extends EventEmitter {
         // The command is always echoed on the shell console. We need to trim it, and thus validate it.
         const cmd = this.#cmd;
         if (!this.#stdout.startsWith(cmd.cmd)) {
-            this.#reject(new Error(`data does not start with command: ${cmd.cmd}`));
+            this.#reject(new PowerShellError(`data does not start with command: ${cmd.cmd}`));
             return;
         }
 
@@ -222,10 +235,10 @@ export class PowerShell extends EventEmitter {
         if (cmd.timeoutId) {
             clearTimeout(cmd.timeoutId);
         }
-        this.#popQueue();
         if (this.#log) {
             console.log(`exec completed: ${cmd.cmd.trimEnd()}`);
         }
+        this.#popQueue();
         resolve(result);
     }
 
@@ -262,7 +275,7 @@ export class PowerShell extends EventEmitter {
      */
     exec(cmd, timeout) {
         if (!this.#child) {
-            throw new Error('No open shell to execute commands');
+            throw new PowerShellError('No open shell to execute commands');
         }
         return new Promise((resolve, reject) => {
             /** @type {PowerShellCmd} */
