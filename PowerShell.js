@@ -1,4 +1,4 @@
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, exec as _exec, execFile as _execFile, spawn } from 'child_process';
 import { EventEmitter } from 'events';
 
 /**
@@ -359,3 +359,121 @@ export class PowerShell extends EventEmitter {
         return !!this.#child;
     }
 }
+
+/**
+ * Common child function for running shell commands
+ *
+ * @param {(value: string | PromiseLike<string>) => void} resolve
+ * @param {(reason: any) => void} reject
+ * @param {NodeJS.Timeout?} timeoutId
+ * @param {import('child_process').ExecException | import('child_process').ExecFileException | null} error
+ * @param {string} stdout
+ * @param {string} stderr
+ */
+const ps_child_func = (resolve, reject, timeoutId, error, stdout, stderr) => {
+    if (timeoutId) {
+        clearTimeout(timeoutId);
+    }
+    if (error) {
+        // Strip ANSI Color codes from errors from PowerShell-7
+        // Even with TERM=xterm-mono we still get colored errors :(
+        const regex = new RegExp(
+            // eslint-disable-next-line no-control-regex
+            /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
+        );
+        error.message = error.message.replace(regex, '');
+        reject(error);
+    } else {
+        if (stderr) {
+            console.log(`discarding stderr: ${stderr}`);
+        }
+        resolve(stdout);
+    }
+};
+
+/**
+ * Common timeout function for running shell commands
+ *
+ * @param {import('child_process').ChildProcess} child
+ * @param {(reason: any) => void} reject
+ * @param {string} cmd
+ */
+const ps_timeout_func = (child, reject, cmd) => {
+    const error = `timeout: ${cmd}`;
+    console.log(error);
+    child.removeAllListeners();
+    child.kill();
+    reject(new PowerShellExecTimeout(error));
+};
+
+/**
+ * Executes PowerShell commands in a promise.
+ * This can be more performance and reliable than keeping a shell opening and piping
+ * commands to it via stdin, reading stdout until we get a prompt, etc.
+ * Reliable as stdout is only from the command and not the shell.
+ * Performant as we can open many shells at once and await the result.
+ *
+ * @param {string} cmd
+ * @param {number | undefined} timeout
+ * @param {Partial<PowerShellOptions> | undefined} options
+ * @returns {Promise<string>}
+ */
+export const exec = async (cmd, timeout = undefined, options = undefined) => {
+    return new Promise((resolve, reject) => {
+        /** @type {NodeJS.Timeout?} */
+        let timeoutId;
+        const child = _exec(
+            cmd,
+            {
+                shell: options?.shell ?? 'PowerShell',
+                env: { ...process.env, TERM: 'xterm-mono' },
+            },
+            (error, stdout, stderr) => {
+                ps_child_func(resolve, reject, timeoutId, error, stdout, stderr);
+            },
+        );
+        if (timeout) {
+            timeoutId = setTimeout(() => ps_timeout_func(child, reject, cmd), timeout);
+        }
+    });
+};
+
+/**
+ * Executes a file in a promise.
+ *
+ * The same as exec, but without a shell.
+ * Useful for when you want to say run the `net use` Windows API
+ * when the equivalent PowerShell applet doesn't work reliably.
+ *
+ * @param {string} cmd
+ * @param {string[] | undefined} args
+ * @param {number | undefined} timeout
+ * @returns {Promise<string>}
+ */
+export const execFile = async (cmd, args = undefined, timeout = undefined) => {
+    return new Promise((resolve, reject) => {
+        /** @type {NodeJS.Timeout?} */
+        let timeoutId;
+        const child = _execFile(
+            cmd,
+            args,
+            { env: { ...process.env, TERM: 'xterm-mono' } },
+            (error, stdout, stderr) => {
+                ps_child_func(resolve, reject, timeoutId, error, stdout, stderr);
+            },
+        );
+        if (timeout) {
+            timeoutId = setTimeout(() => {
+                timeoutId = setTimeout(
+                    () =>
+                        ps_timeout_func(
+                            child,
+                            reject,
+                            `${cmd}${args?.length ? ' ' : ''}${args?.join(' ')}`,
+                        ),
+                    timeout,
+                );
+            }, timeout);
+        }
+    });
+};

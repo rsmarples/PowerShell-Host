@@ -59,3 +59,18 @@ export class PowerShell {
 export class PowerShellError extends Error {}
 export class PowerShellExecError extends PowerShellError {}
 export class PowerShellExecTimeout extends PowerShellError {}
+
+export interface PowerShellExecOptions {
+    shell: string;
+}
+
+export async function exec(
+    cmd: string,
+    timeout?: number,
+    options?: Partial<PowerShellExecOptions>,
+): Promise<string> {}
+export async function execFile(
+    cmd: string,
+    args?: string[],
+    timeout?: number,
+): Promise<string> {}
