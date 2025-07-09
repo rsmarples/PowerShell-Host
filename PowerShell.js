@@ -11,6 +11,7 @@ const defaultOptions = {
     shell: 'PowerShell',
     args: [],
     log: false,
+    debug: false,
 };
 
 /**
@@ -78,94 +79,16 @@ export class PowerShell extends EventEmitter {
     #stdout = '';
     /** @type {string} */
     #stderr = '';
+    /** @type {string} */
+    #prompt = 'PS>';
     /** @type {PowerShellCmd} */
     #cmd;
     /** @type {PowerShellCmd[]} */
     #cmdQueue = [];
     /** @type {boolean} */
     #log = false;
-
-    /**
-     * Spawns a PowerShell process.
-     * You can only have one of these.
-     * Call close() once finished to kill the PowerShell process.
-     * Consumers should listen to the `error` event which could be raised before the shell
-     * has fully initialised as this could happen after the open promise has been resolved.
-     *
-     * @param {PowerShellOptions} [options] PowerShell options
-     * @returns {Promise<void>}
-     */
-    open(options) {
-        const opts = {
-            ...defaultOptions,
-            ...options,
-        };
-        this.#stdout = '';
-        this.#stderr = '';
-        this.#log = opts.log;
-
-        return new Promise((resolve, reject) => {
-            const ps = this;
-
-            if (ps.#child) {
-                reject(new PowerShellError('already spawned something'));
-                return;
-            }
-
-            ps.#child = spawn(opts.shell, opts.args);
-            if (!ps.#child) {
-                reject(new PowerShellError('shell failed to spawn'));
-                return;
-            }
-
-            ps.#child.on('spawn', function () {
-                ps.#spawned = true;
-                resolve();
-            });
-            this.#child.on('error', function (err) {
-                if (!ps.#spawned) {
-                    ps.#child.removeAllListeners();
-                    ps.#child = undefined;
-                    reject(err);
-                    return;
-                }
-                ps.emit('error', err);
-            });
-            this.#child.on('exit', (code, signal) => {
-                ps.#child.removeAllListeners();
-                ps.#child = undefined;
-
-                if (this.#stderr) {
-                    const err = new PowerShellError(ps.#stderr);
-                    ps.#stderr = '';
-                    ps.emit('error', err);
-                }
-
-                // The client can remove the listener when closing to avoid this emit
-                ps.emit('exit', code, signal);
-
-                // We need to reject the pending queue
-                /** @type {PowerShellCmd} */
-                let q;
-                while ((q = this.#cmdQueue.shift())) {
-                    q.reject(new PowerShellError('shell exited'));
-                }
-            });
-
-            this.#child.stdout.on('data', function (chunk) {
-                ps.#processStdOut(chunk);
-            });
-            this.#child.stderr.on('data', function (chunk) {
-                ps.#processStdErr(chunk);
-            });
-
-            try {
-                this.#child.stdin.write(`${outDefault}${prompt}`);
-            } catch (err) {
-                reject(err);
-            }
-        });
-    }
+    /** @type {boolean} */
+    #debug = false;
 
     /** @param {Stream.Writable} */
     #uncork(stream) {
@@ -210,7 +133,9 @@ export class PowerShell extends EventEmitter {
     #reject(error) {
         const cmd = this.#cmd;
         if (!cmd) {
-            console.log(`powershell-host: nowhere for this error to go: ${err}`);
+            if (this.#debug) {
+                console.log(`powershell-host: nowhere for this error to go: ${err}`);
+            }
             this.#popQueue();
             return;
         }
@@ -221,7 +146,7 @@ export class PowerShell extends EventEmitter {
         }
         if (this.#log) {
             const errorStr =
-                error instanceof PowerShellCommandError ? error.message : `${error}`;
+                error instanceof PowerShellExecError ? error.message : `${error}`;
             console.log(`exec rejected: ${cmd.cmd.trimEnd()}: ${errorStr}`);
         }
         this.#popQueue();
@@ -237,7 +162,7 @@ export class PowerShell extends EventEmitter {
 
         const cmd = this.#cmd;
         if (!cmd) {
-            if (this.#log) {
+            if (this.#debug) {
                 console.log('powershell-host: no command to resolve to!');
             }
             this.#popQueue();
@@ -245,14 +170,15 @@ export class PowerShell extends EventEmitter {
         }
 
         // The command is always echoed on the shell console. We need to trim it, and thus validate it.
-        if (!this.#stdout.startsWith(cmd.cmd)) {
+        const echoedCmd = this.#stdout.trimStart();
+        if (!echoedCmd.startsWith(cmd.cmd)) {
             this.#reject(
-                new PowerShellError(`data does not start with command: ${cmd.cmd}`),
+                new PowerShellError(`stdout does not start with command: ${cmd.cmd}`),
             );
             return;
         }
 
-        const result = this.#stdout.substring(cmd.cmd.length).trimEnd();
+        const result = echoedCmd.substring(cmd.cmd.length).trimEnd();
         const resolve = cmd.resolve;
         if (cmd.timeoutId) {
             clearTimeout(cmd.timeoutId);
@@ -264,23 +190,123 @@ export class PowerShell extends EventEmitter {
         resolve(result);
     }
 
-    #processStdOut(chunk) {
-        const data = chunk.toString();
-        if (data === 'PS>') {
-            if (!this.#inited) {
-                this.#inited = true;
-                this.#popQueue();
-            } else {
-                this.#resolveCmd();
-            }
-        } else if (this.#inited) {
-            this.#stdout += data;
-        }
-    }
+    /**
+     * Spawns a PowerShell process.
+     * You can only have one of these.
+     * Call close() once finished to kill the PowerShell process.
+     * Consumers should listen to the `error` event which could be raised before the shell
+     * has fully initialised as this could happen after the open promise has been resolved.
+     *
+     * @param {PowerShellOptions} [options] PowerShell options
+     * @returns {Promise<void>}
+     */
+    open(options) {
+        const opts = {
+            ...defaultOptions,
+            ...options,
+        };
+        this.#stdout = '';
+        this.#stderr = '';
+        this.#log = opts.log;
+        this.#debug = opts.debug;
 
-    #processStdErr(chunk) {
-        const data = chunk.toString();
-        this.#stderr += data;
+        return new Promise((resolve, reject) => {
+            const ps = this;
+
+            if (ps.#child) {
+                reject(new PowerShellError('already spawned something'));
+                return;
+            }
+
+            ps.#child = spawn(opts.shell, opts.args);
+            if (!ps.#child) {
+                reject(new PowerShellError('shell failed to spawn'));
+                return;
+            }
+
+            ps.#child.on('spawn', function () {
+                ps.#spawned = true;
+                resolve();
+            });
+            ps.#child.on('error', function (err) {
+                if (!ps.#spawned) {
+                    ps.#child.removeAllListeners();
+                    ps.#child = undefined;
+                    reject(err);
+                    return;
+                }
+                ps.emit('error', err);
+            });
+            ps.#child.on('exit', (code, signal) => {
+                ps.#child.removeAllListeners();
+                ps.#child = undefined;
+
+                if (this.#stderr) {
+                    const err = new PowerShellError(ps.#stderr);
+                    ps.#stderr = '';
+                    ps.emit('error', err);
+                }
+
+                // The client can remove the listener when closing to avoid this emit
+                ps.emit('exit', code, signal);
+
+                // We need to reject the pending queue
+                /** @type {PowerShellCmd} */
+                let q;
+                while ((q = this.#cmdQueue.shift())) {
+                    q.reject(new PowerShellError('shell exited'));
+                }
+            });
+
+            ps.#child.stdout.on('readable', () => {
+                /** @type {Buffer} */
+                let chunk;
+                while ((chunk = ps.#child.stdout.read()) !== null) {
+                    const data = chunk.toString();
+                    if (data.endsWith(ps.#prompt)) {
+                        if (!ps.#inited) {
+                            ps.#inited = true;
+                            ps.#popQueue();
+                        } else {
+                            ps.#stdout += data.substring(0, -ps.#prompt.length);
+                            ps.#resolveCmd();
+                        }
+                    } else {
+                        if (ps.#debug && data.includes(ps.#prompt)) {
+                            console.log(
+                                'powershell-host: WARNING!!!! stdout chunk contains PS>: START',
+                            );
+                            console.log(data);
+                            console.log(
+                                'powershell-host: WARNING!!!! stdout chunk contains PS>: END',
+                            );
+                        } else if (ps.#debug) {
+                            console.log(`powershell-host: stdout+= ${data}`);
+                        }
+                        if (ps.#inited) {
+                            ps.#stdout += data;
+                        }
+                    }
+                }
+            });
+
+            ps.#child.stderr.on('readable', () => {
+                /** @type {Buffer} */
+                let chunk;
+                while ((chunk = this.#child.stdout.read()) !== null) {
+                    ps.#stderr += chunk.toString();
+                }
+                if (ps.#debug) {
+                    console.log(`powershell-host: WARNING stderr += ${ps.#stderr}`);
+                }
+            });
+
+            try {
+                ps.#child.stdin.write(`${outDefault}${prompt}`);
+            } catch (err) {
+                reject(err);
+            }
+        });
     }
 
     /**
