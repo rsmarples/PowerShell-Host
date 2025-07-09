@@ -63,7 +63,8 @@ const prompt = `
  */
 
 export class PowerShellError extends Error {}
-export class PowerShellTimeout extends PowerShellError {}
+export class PowerShellExecError extends PowerShellError {}
+export class PowerShellExecTimeout extends PowerShellError {}
 
 /**
  * Hosts a PowerShell process where you can send commands and receive data back.
@@ -166,6 +167,11 @@ export class PowerShell extends EventEmitter {
         });
     }
 
+    /** @param {Stream.Writable} */
+    #uncork(stream) {
+        stream.uncork();
+    }
+
     #popQueue() {
         this.#stderr = '';
         this.#stdout = '';
@@ -181,24 +187,30 @@ export class PowerShell extends EventEmitter {
                 cmd.timeoutId = undefined;
                 // XXX We neet to send CTRL-C somehow
                 ps.#popQueue();
-                cmd.reject(new PowerShellTimeout(`exec timeout: ${cmd.cmd.trimEnd()}`));
+                cmd.reject(
+                    new PowerShellExecTimeout(`exec timeout: ${cmd.cmd.trimEnd()}`),
+                );
             }, cmd.timeout);
         }
         if (this.#log) {
             console.log(`exec: ${cmd.cmd.trimEnd()}`);
         }
+        this.#child.stdin.cork();
         this.#child.stdin.write(`${cmd.cmd}`, function (error) {
             if (error) {
                 ps.#popQueue();
                 cmd.reject(new PowerShellError(error));
             }
         });
+        const func = this.#uncork.bind(this);
+        process.nextTick(func, this.#child.stdin);
     }
 
-    #reject(err) {
+    /** @param {Error} error */
+    #reject(error) {
         const cmd = this.#cmd;
         if (!cmd) {
-            console.log(`nowhere for this error to go: ${err}`);
+            console.log(`powershell-host: nowhere for this error to go: ${err}`);
             this.#popQueue();
             return;
         }
@@ -208,21 +220,31 @@ export class PowerShell extends EventEmitter {
             clearTimeout(cmd.timeoutId);
         }
         if (this.#log) {
-            console.log(`exec rejected: ${cmd.cmd.trimEnd()}: ${err}`);
+            const errorStr =
+                error instanceof PowerShellCommandError ? error.message : `${error}`;
+            console.log(`exec rejected: ${cmd.cmd.trimEnd()}: ${errorStr}`);
         }
         this.#popQueue();
-        rej(err);
+        rej(error);
     }
 
     #resolveCmd() {
         if (this.#stderr) {
             const err = this.#stderr.trim();
-            this.#reject(err);
+            this.#reject(new PowerShellExecError(err));
+            return;
+        }
+
+        const cmd = this.#cmd;
+        if (!cmd) {
+            if (this.#log) {
+                console.log('powershell-host: no command to resolve to!');
+            }
+            this.#popQueue();
             return;
         }
 
         // The command is always echoed on the shell console. We need to trim it, and thus validate it.
-        const cmd = this.#cmd;
         if (!this.#stdout.startsWith(cmd.cmd)) {
             this.#reject(
                 new PowerShellError(`data does not start with command: ${cmd.cmd}`),

@@ -57,4 +57,5 @@ export class PowerShell {
 }
 
 export class PowerShellError extends Error {}
-export class PowerShellTimeout extends PowerShellError {}
+export class PowerShellExecError extends PowerShellError {}
+export class PowerShellExecTimeout extends PowerShellError {}
