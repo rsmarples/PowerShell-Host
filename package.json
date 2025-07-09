@@ -1,6 +1,6 @@
 {
     "name": "powershell-host",
-    "version": "1.1.6",
+    "version": "1.1.7",
     "description": "Hosts a PowerShell process to execute asynchronous PowerShell commands and get data back fast.",
     "author": {
         "name": "Roy Marples",
